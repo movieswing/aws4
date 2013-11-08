@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/bmizerany/aws4"
+	"io/ioutil"
 	"net/http"
 	"strings"
 )
@@ -74,14 +75,17 @@ type DB struct {
 // was one.
 func (db *DB) Exec(action string, v interface{}) error {
 	var x struct{}
-	return db.Query(action, v).Decode(&x)
+	d, _ := db.Query(action, v)
+	return d.Decode(&x)
 }
 
 // Query executes an action with a JSON-encoded v as the body.  A nil v is
 // represented as the JSON value {}. If an error occurs while communicating
 // with DynamoDB, Query returns a Decoder that returns only the error,
 // otherwise a json.Decoder is returned.
-func (db *DB) Query(action string, v interface{}) Decoder {
+// We also return the http.Response here so that the caller can read the body
+// until EOF, which is necessary for Keep-Alive support.
+func (db *DB) Query(action string, v interface{}) (Decoder, *http.Response) {
 	cl := db.Client
 	if cl == nil {
 		cl = aws4.DefaultClient
@@ -103,19 +107,19 @@ func (db *DB) Query(action string, v interface{}) Decoder {
 
 	b, err := json.Marshal(v)
 	if err != nil {
-		return &errorDecoder{err: err}
+		return &errorDecoder{err: err}, nil
 	}
 
 	r, err := http.NewRequest("POST", url, bytes.NewBuffer(b))
 	if err != nil {
-		return &errorDecoder{err: err}
+		return &errorDecoder{err: err}, nil
 	}
 	r.Header.Set("Content-Type", "application/x-amz-json-1.0")
 	r.Header.Set("X-Amz-Target", "DynamoDB_"+ver+"."+action)
 
 	resp, err := cl.Do(r)
 	if err != nil {
-		return &errorDecoder{err: err}
+		return &errorDecoder{err: err}, nil
 	}
 
 	if code := resp.StatusCode; code != 200 {
@@ -125,7 +129,7 @@ func (db *DB) Query(action string, v interface{}) Decoder {
 			Type    string `json:"__type"`
 		}
 		json.NewDecoder(resp.Body).Decode(&e)
-		return &errorDecoder{err: &ResponseError{code, e.Type, e.Message}}
+		return &errorDecoder{err: &ResponseError{code, e.Type, e.Message}}, resp
 	}
-	return json.NewDecoder(resp.Body)
+	return json.NewDecoder(resp.Body), resp
 }
