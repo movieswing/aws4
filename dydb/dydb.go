@@ -6,7 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/zhaytee/aws4"
+	"github.com/movieswing/aws4"
 	"net/http"
 	"strings"
 )
